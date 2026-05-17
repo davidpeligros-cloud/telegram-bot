@@ -1,13 +1,16 @@
 from telethon import TelegramClient, events
 from dotenv import load_dotenv
+from database import save_deal
+
 import os
 import re
 import datetime
 import smtplib
+
 from email.mime.text import MIMEText
 
 # =========================
-# 🔐 LOAD ENV
+# LOAD ENV
 # =========================
 
 load_dotenv()
@@ -17,27 +20,46 @@ api_hash = os.getenv("API_HASH")
 
 EMAIL_USER = os.getenv("EMAIL_USER")
 EMAIL_PASS = os.getenv("EMAIL_PASS")
+
 CHAT_ID = os.getenv("CHAT_ID")
 
 # =========================
-# 🤖 TELEGRAM CLIENT
+# TELEGRAM CLIENT
 # =========================
 
-client = TelegramClient("session", api_id, api_hash)
+client = TelegramClient(
+    "session",
+    api_id,
+    api_hash
+)
 
 # =========================
-# 🔥 MODELOS IMPORTANTES
+# ANTI DUPLICADOS
+# =========================
+
+sent_links = set()
+
+# =========================
+# MODELOS HOT
 # =========================
 
 HOT_MODELS = [
-    "jordan", "jordan 4", "black cat", "military black",
-    "dunk", "sb dunk", "air force",
-    "yeezy", "new balance", "9060",
-    "2002r", "samba", "asics"
+    "jordan",
+    "jordan 4",
+    "black cat",
+    "military black",
+    "dunk",
+    "sb dunk",
+    "air force",
+    "yeezy",
+    "9060",
+    "2002r",
+    "samba",
+    "asics"
 ]
 
 # =========================
-# 🧠 SCORE SYSTEM
+# SCORE
 # =========================
 
 def calcular_score(texto, precios):
@@ -45,117 +67,183 @@ def calcular_score(texto, precios):
     score = 0
     texto = texto.lower()
 
-    # modelos hot
     for model in HOT_MODELS:
+
         if model in texto:
             score += 20
 
-    # link presente
     if "http" in texto:
         score += 10
 
-    # precios
     for p in precios:
+
         nums = re.findall(r"\d+", p)
+
         if nums:
+
             price = int(nums[0])
 
             if price <= 30:
                 score += 30
+
             elif price <= 50:
                 score += 20
+
             elif price <= 80:
                 score += 10
 
     return score
 
 # =========================
-# 📧 EMAIL FUNCTION
+# EMAIL
 # =========================
 
 def enviar_email(subject, body):
 
     try:
-        msg = MIMEText(body, "plain", "utf-8")
+
+        msg = MIMEText(
+            body,
+            "plain",
+            "utf-8"
+        )
+
         msg["Subject"] = subject
         msg["From"] = EMAIL_USER
         msg["To"] = EMAIL_USER
 
-        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server = smtplib.SMTP(
+            "smtp.gmail.com",
+            587
+        )
+
         server.starttls()
-        server.login(EMAIL_USER, EMAIL_PASS)
+
+        server.login(
+            EMAIL_USER,
+            EMAIL_PASS
+        )
+
         server.send_message(msg)
+
         server.quit()
 
     except Exception as e:
+
         print("Error email:", e)
 
 # =========================
-# 📊 HANDLER
+# HANDLER
 # =========================
 
 @client.on(events.NewMessage)
 async def handler(event):
 
     text = event.raw_text
+
+    if len(text) < 20:
+        return
+
     lower = text.lower()
 
-    links = re.findall(r'https?://\S+', text)
-    prices = re.findall(r'\d+\€|\d+\$', text)
+    links = re.findall(
+        r'https?://\S+',
+        text
+    )
+
+    prices = re.findall(
+        r'\d+(?:[.,]\d+)?\s?(?:€|\$)',
+        text
+    )
 
     if not links:
         return
 
-    score = calcular_score(lower, prices)
+    if links[0] in sent_links:
+        return
 
-    # SOLO DEALS BUENAS
-    if score >= 40:
+    sent_links.add(links[0])
 
-        message = f"""
-🔥 TOP DEAL DETECTADA
+    score = calcular_score(
+        lower,
+        prices
+    )
 
-📦 Producto:
-{text}
+    if score < 60:
+        return
 
-🔗 Links:
-{chr(10).join(links)}
+    price_text = (
+        ", ".join(prices)
+        if prices else
+        "No detectado"
+    )
 
-💰 Precios:
-{prices}
+    clean_text = text[:500]
+
+    message = f"""
+🔥 TOP SNEAKER DEAL
 
 📊 Score: {score}
-🕒 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}
+
+💰 Precio:
+{price_text}
+
+🔗 Link:
+{links[0]}
+
+📝 Producto:
+{clean_text}
+
+🕒 Fecha:
+{datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}
 """
 
-        print(message)
+    print(message)
 
-        # guardar historial
-        with open("deals.txt", "a", encoding="utf-8") as f:
-            f.write(message + "\n" + "-"*60 + "\n")
+    # =========================
+    # GUARDAR DB
+    # =========================
 
-        # =========================
-        # 📲 TELEGRAM
-        # =========================
+    save_deal(
+        clean_text,
+        links[0],
+        price_text,
+        score,
+        datetime.datetime.now().strftime(
+            "%Y-%m-%d %H:%M"
+        )
+    )
 
-        try:
-            await client.send_message(int(CHAT_ID), message)
-        except Exception as e:
-            print("Error telegram:", e)
+    # =========================
+    # TELEGRAM
+    # =========================
 
-        # =========================
-        # 📧 EMAIL
-        # =========================
+    try:
 
-        enviar_email(
-            "🔥 Sneaker Deal Encontrado",
+        await client.send_message(
+            int(CHAT_ID),
             message
         )
 
+    except Exception as e:
+
+        print("Error telegram:", e)
+
+    # =========================
+    # EMAIL
+    # =========================
+
+    enviar_email(
+        "Sneaker Deal Encontrado",
+        message
+    )
+
 # =========================
-# 🚀 START
+# START
 # =========================
 
-print("🤖 BOT PRO V2 INICIADO...")
+print("BOT PRO V2 INICIADO...")
 
 client.start()
+
 client.run_until_disconnected()
