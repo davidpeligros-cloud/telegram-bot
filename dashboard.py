@@ -195,8 +195,7 @@ with tab1:
             with col:
                 with st.container():
                     img_path = row["image_path"]
-                    # Si existe imagen descargada, la mostramos
-                    if img_path and os.path.exists(img_path):
+                    if isinstance(img_path, str) and img_path.strip() and os.path.exists(img_path):
                         st.image(img_path, use_container_width=True)
                     else:
                         # Imagen de stock premium de zapatilla como fallback
