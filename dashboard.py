@@ -1,4 +1,5 @@
 import sqlite3
+import os
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -50,6 +51,31 @@ with st.sidebar:
         [datetime.now().date() - timedelta(days=last_days), datetime.now().date()],
     )
     st.markdown("---")
+    
+    # Mostrar cuenta atrás del próximo resumen bisemanal
+    next_summary_path = "data/next_summary.txt"
+    if os.path.exists(next_summary_path):
+        try:
+            with open(next_summary_path, "r") as f:
+                next_summary_str = f.read().strip()
+                if next_summary_str:
+                    next_summary = datetime.fromisoformat(next_summary_str)
+                    now_time = datetime.now()
+                    if next_summary > now_time:
+                        diff = next_summary - now_time
+                        hours = int(diff.total_seconds() // 3600)
+                        minutes = int((diff.total_seconds() % 3600) // 60)
+                        
+                        st.metric(
+                            "Próximo Resumen Bisemanal", 
+                            f"{hours}h {minutes}m", 
+                            help=f"Programado para el {next_summary.strftime('%d/%m/%Y %H:%M')}"
+                        )
+                    else:
+                        st.info("🔄 Procesando resumen actual...")
+        except Exception:
+            pass
+            
     st.markdown(
         "[Actualizar datos](#)  \n*Los datos se cargan automáticamente al iniciar el dashboard.*"
     )

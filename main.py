@@ -147,6 +147,13 @@ async def run_summary_loop():
         if now >= target:
             target += timedelta(days=2)
             
+        # Guardar la fecha en un archivo para que el dashboard lo lea
+        try:
+            with open("data/next_summary.txt", "w") as f:
+                f.write(target.isoformat())
+        except Exception as e:
+            logger.error(f"Error guardando fecha de resumen: {e}")
+            
         sleep_seconds = (target - now).total_seconds()
         logger.info(f"Resumen bisemanal programado para: {target} (en {sleep_seconds/3600:.1f} horas)")
         
