@@ -9,6 +9,7 @@ import os
 import smtplib
 from datetime import datetime, timezone, timedelta
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
@@ -168,6 +169,99 @@ async def run_summary_loop():
         await asyncio.sleep(60)
 
 
+def generate_shipments_email_html(shipments) -> str:
+    html = """
+    <html>
+      <body style="font-family: Arial, sans-serif; background-color: #f4f4f6; padding: 20px;">
+        <div style="max-width: 600px; margin: auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
+          <h2 style="color: #2e7d32; text-align: center; margin-bottom: 5px;">📦 Estado de tus Envíos Activos 📦</h2>
+          <p style="text-align: center; color: #666; margin-top: 0; font-size: 0.95em;">Aquí tienes el resumen diario de tus compras en camino.</p>
+          <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+    """
+    for ship in shipments:
+        name = ship['product_name']
+        carrier = ship['carrier']
+        tracking = ship['tracking_number']
+        status = ship['status']
+        notes = ship['notes'] or "Sin notas adicionales."
+        
+        # Generar enlaces oficiales de seguimiento automáticos
+        tracking_url = "#"
+        carrier_lower = carrier.lower()
+        if "correosexpress" in carrier_lower or "correos express" in carrier_lower:
+            tracking_url = f"https://www.correosexpress.com/web/correosexpress/consultanos?numEnvio={tracking}"
+        elif "correos" in carrier_lower:
+            tracking_url = f"https://www.correos.es/es/es/herramientas/localizador/detalle?cod_envio={tracking}"
+        elif "seur" in carrier_lower:
+            tracking_url = f"https://www.seur.com/livetracking/pages/seguimiento-online-busqueda.do?excode={tracking}"
+        elif "dhl" in carrier_lower:
+            tracking_url = f"https://www.dhl.com/es-es/home/tracking/tracking-express.html?submit=1&tracking-id={tracking}"
+        
+        status_color = "#e67e22" # Naranja para Pedido/Enviado
+        if status == "En reparto":
+            status_color = "#3498db" # Azul
+        elif status == "Recibido":
+            status_color = "#2ecc71" # Verde
+            
+        html += f"""
+        <div style="background: #fafafa; border-left: 5px solid {status_color}; padding: 15px; margin-bottom: 15px; border-radius: 4px;">
+          <h3 style="margin-top: 0; color: #333; margin-bottom: 10px;">{name}</h3>
+          <p style="margin: 4px 0; font-size: 0.9em; color: #555;"><strong>🚚 Transportista:</strong> {carrier}</p>
+          <p style="margin: 4px 0; font-size: 0.9em; color: #555;"><strong>🔢 Código Seguimiento:</strong> <span style="font-family: monospace; background: #eef2f3; padding: 2px 6px; border-radius: 3px; font-weight: bold; color: #2c3e50;">{tracking}</span></p>
+          <p style="margin: 4px 0; font-size: 0.9em; color: #555;"><strong>📍 Estado Actual:</strong> <span style="color: {status_color}; font-weight: bold; background: {status_color}15; padding: 1px 6px; border-radius: 3px;">{status}</span></p>
+          <p style="margin: 10px 0 0 0; color: #777; font-size: 0.85em; font-style: italic; border-top: 1px dashed #eee; padding-top: 8px;">📝 {notes}</p>
+        """
+        if tracking_url != "#":
+            html += f'<a href="{tracking_url}" target="_blank" style="display: inline-block; margin-top: 12px; background-color: #2e7d32; color: white; text-decoration: none; padding: 8px 14px; border-radius: 6px; font-weight: bold; font-size: 0.85em; box-shadow: 0 2px 4px rgba(46,125,50,0.2);">Rastrear Paquete</a>'
+        html += "</div>"
+        
+    html += """
+          <p style="font-size: 0.8em; color: #999; text-align: center; margin-top: 30px;">
+            Este correo es enviado automáticamente por tu Sneaker Bot. Puedes gestionar tus paquetes desde el Dashboard de Streamlit.
+          </p>
+        </div>
+      </body>
+    </html>
+    """
+    return html
+
+
+async def run_shipments_report_loop():
+    logger.info("Bucle de resumen de envíos iniciado (envíos activos diarios)")
+    while True:
+        # Esperar 24 horas entre envíos
+        await asyncio.sleep(24 * 3600)
+        
+        try:
+            active_shipments = db.get_active_shipments()
+            # Convertir rows de sqlite a diccionarios
+            shipments_list = [dict(row) for row in active_shipments]
+            
+            if shipments_list and EMAIL_USER and EMAIL_PASS:
+                logger.info("Generando reporte de envíos activos diarios...")
+                html_content = generate_shipments_email_html(shipments_list)
+                
+                msg = MIMEMultipart("alternative")
+                msg["Subject"] = "📦 Resumen Diario de tus Envíos Activos"
+                msg["From"] = EMAIL_USER
+                msg["To"] = EMAIL_USER
+                
+                part = MIMEText(html_content, "html", "utf-8")
+                msg.attach(part)
+                
+                with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
+                    server.starttls()
+                    server.login(EMAIL_USER, EMAIL_PASS)
+                    server.send_message(msg)
+                    
+                logger.info("Reporte diario de envíos enviado con éxito")
+            else:
+                logger.info("No hay envíos activos o faltan credenciales de email. Reporte omitido.")
+        except Exception as e:
+            logger.error(f"Error en bucle de reporte de envíos: {e}", exc_info=True)
+
+
+
 @client.on(events.NewMessage)
 async def handler(event) -> None:
     try:
@@ -205,6 +299,18 @@ async def handler(event) -> None:
             else datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
         )
 
+        # Descarga opcional de imágenes
+        image_path = None
+        if event.message.media:
+            try:
+                os.makedirs("data/images", exist_ok=True)
+                downloaded = await event.message.download_media(file="data/images/")
+                if downloaded:
+                    image_path = os.path.relpath(downloaded, os.getcwd()).replace("\\", "/")
+                    logger.info(f"Foto descargada con éxito: {image_path}")
+            except Exception as img_err:
+                logger.error(f"Error descargando foto del mensaje: {img_err}")
+
         saved = db.save_deal(
             product=product_text,
             link=link,
@@ -214,6 +320,7 @@ async def handler(event) -> None:
             date=message_date,
             message_id=getattr(event.message, 'id', None),
             user_id=getattr(event.message, 'sender_id', None),
+            image_path=image_path,
         )
 
         if not saved:
@@ -246,6 +353,7 @@ async def run_bot() -> None:
             logger.info("✅ Conectado a Telegram")
             asyncio.create_task(periodic_cleanup())
             asyncio.create_task(run_summary_loop())
+            asyncio.create_task(run_shipments_report_loop())
             await client.run_until_disconnected()
         except SessionPasswordNeededError:
             logger.error("La sesión requiere contraseña de dos factores. Verifica tu cuenta de Telegram.")

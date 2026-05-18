@@ -94,6 +94,18 @@ async def scrape_historical_data():
                             else datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
                         )
                         
+                        # Descarga opcional de imágenes
+                        image_path = None
+                        if message.media:
+                            try:
+                                os.makedirs("data/images", exist_ok=True)
+                                downloaded = await message.download_media(file="data/images/")
+                                if downloaded:
+                                    image_path = os.path.relpath(downloaded, os.getcwd()).replace("\\", "/")
+                                    logger.info(f"Foto histórica descargada: {image_path}")
+                            except Exception as img_err:
+                                logger.error(f"Error descargando foto histórica: {img_err}")
+                        
                         saved = db.save_deal(
                             product=product_text,
                             link=link,
@@ -103,6 +115,7 @@ async def scrape_historical_data():
                             date=message_date,
                             message_id=message.id,
                             user_id=message.sender_id,
+                            image_path=image_path,
                         )
                         
                         if saved:

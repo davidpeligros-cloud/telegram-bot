@@ -83,14 +83,12 @@ HOT_TERMS = {
     "promo": 10,
 }
 
-PRICE_PATTERNS = [
-    r"(\d+[.,]\d{2})\s?(?:€|\$|£|GBP)",
-    r"(?:€|\$|£|GBP)\s?(\d+[.,]\d{2})",
-    r"(\d+[.,]\d{1,3})\s?€",
-    r"\$\s?(\d+[.,]\d{1,3})",
-    r"(\d+)\s?€",
-    r"(\d+)\s?USD",
-]
+# Unificar en una sola regex para evitar que decimales se traten como números independientes
+PRICE_REGEX = re.compile(
+    r"\b(\d+(?:[.,]\d{1,2})?)\s*(?:€|\$|£|GBP|USD|EUR)\b|"
+    r"(?:€|\$|£|GBP|USD|EUR)\s*\b(\d+(?:[.,]\d{1,2})?)\b",
+    re.IGNORECASE
+)
 
 LINK_PATTERN = re.compile(r"https?://[^\s\)\]\}]+")
 
@@ -105,22 +103,28 @@ def extract_links(text: str) -> List[str]:
 
 
 def extract_prices(text: str) -> List[str]:
-    """Extraer precios en múltiples formatos."""
+    """Extraer precios en múltiples formatos sin duplicados de decimales."""
     if not text:
         return []
 
-    prices = []
-    for pattern in PRICE_PATTERNS:
-        prices.extend(re.findall(pattern, text, flags=re.IGNORECASE))
+    matches = PRICE_REGEX.findall(text)
+    # Extraer el valor no vacío de cada tupla de coincidencia
+    prices = [m[0] or m[1] for m in matches]
     return list(dict.fromkeys(prices))
 
 
 def normalize_price(price_text: str) -> float:
-    """Convertir un precio detectado a número."""
-    cleaned = re.sub(r"[€$£,\s]|GBP|USD|EUR", "", price_text, flags=re.IGNORECASE)
+    """Convertir un precio detectado a número flotante manejando comas y puntos decimales."""
+    # Reemplazar coma por punto para soporte decimal europeo
+    cleaned = price_text.replace(",", ".")
+    # Quitar símbolos y letras de monedas
+    cleaned = re.sub(r"[€$£\s]|GBP|USD|EUR", "", cleaned, flags=re.IGNORECASE)
     cleaned = cleaned.replace("..", ".")
+    
+    # Manejar múltiples puntos (ej: miles 1.250.50 -> 1250.50)
     if cleaned.count(".") > 1:
-        cleaned = cleaned.replace(".", "", cleaned.count(".") - 1)
+        parts = cleaned.split(".")
+        cleaned = "".join(parts[:-1]) + "." + parts[-1]
 
     try:
         return float(cleaned)

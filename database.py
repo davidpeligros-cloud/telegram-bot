@@ -57,12 +57,27 @@ class DealDatabase:
                             date TEXT NOT NULL,
                             message_id INTEGER,
                             user_id INTEGER,
+                            image_path TEXT,
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         )
                         """
                     )
 
-                    # Migración de esquema: añadir columna created_at si no existe.
+                    cursor.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS shipments (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            product_name TEXT NOT NULL,
+                            carrier TEXT NOT NULL,
+                            tracking_number TEXT NOT NULL,
+                            status TEXT NOT NULL,
+                            notes TEXT,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                        """
+                    )
+
+                    # Migración de esquema: añadir columnas si no existen.
                     cursor.execute("PRAGMA table_info(deals)")
                     columns = [row[1] for row in cursor.fetchall()]
                     if "created_at" not in columns:
@@ -74,6 +89,9 @@ class DealDatabase:
                     if "user_id" not in columns:
                         logger.info("Migrando esquema: agregando columna user_id")
                         cursor.execute("ALTER TABLE deals ADD COLUMN user_id INTEGER")
+                    if "image_path" not in columns:
+                        logger.info("Migrando esquema: agregando columna image_path")
+                        cursor.execute("ALTER TABLE deals ADD COLUMN image_path TEXT")
 
                     cursor.execute("CREATE INDEX IF NOT EXISTS idx_score ON deals(score DESC)")
                     cursor.execute("CREATE INDEX IF NOT EXISTS idx_date ON deals(date DESC)")
@@ -96,6 +114,7 @@ class DealDatabase:
         date: str,
         message_id: Optional[int] = None,
         user_id: Optional[int] = None,
+        image_path: Optional[str] = None,
     ) -> bool:
         with self.lock:
             try:
@@ -105,10 +124,10 @@ class DealDatabase:
                         """
                         INSERT INTO deals (
                             product, link, price, score,
-                            group_name, date, message_id, user_id
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            group_name, date, message_id, user_id, image_path
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (product, link, price, score, group_name, date, message_id, user_id),
+                        (product, link, price, score, group_name, date, message_id, user_id, image_path),
                     )
                     conn.commit()
                     logger.info(f"Deal guardado: {link}")
@@ -316,3 +335,92 @@ class DealDatabase:
 
     def top_groups(self) -> List[Tuple]:
         return self.get_top_groups(10)
+
+    # =========================
+    # SÉCCIÓN DE ENVÍOS (SHIPMENTS)
+    # =========================
+
+    def save_shipment(
+        self,
+        product_name: str,
+        carrier: str,
+        tracking_number: str,
+        status: str = "Pedido",
+        notes: Optional[str] = None,
+    ) -> bool:
+        with self.lock:
+            try:
+                with self.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        """
+                        INSERT INTO shipments (
+                            product_name, carrier, tracking_number, status, notes
+                        ) VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (product_name, carrier, tracking_number, status, notes),
+                    )
+                    conn.commit()
+                    logger.info(f"Envío guardado: {product_name} - {tracking_number}")
+                    return True
+            except Exception as e:
+                logger.error(f"Error guardando envío: {e}")
+                return False
+
+    def get_all_shipments(self) -> List[sqlite3.Row]:
+        with self.lock:
+            try:
+                with self.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT * FROM shipments ORDER BY created_at DESC")
+                    return cursor.fetchall()
+            except Exception as e:
+                logger.error(f"Error obteniendo todos los envíos: {e}")
+                return []
+
+    def get_active_shipments(self) -> List[sqlite3.Row]:
+        with self.lock:
+            try:
+                with self.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT * FROM shipments WHERE status != 'Recibido' ORDER BY created_at DESC")
+                    return cursor.fetchall()
+            except Exception as e:
+                logger.error(f"Error obteniendo envíos activos: {e}")
+                return []
+
+    def update_shipment_status(self, shipment_id: int, new_status: str, notes: Optional[str] = None) -> bool:
+        with self.lock:
+            try:
+                with self.get_connection() as conn:
+                    cursor = conn.cursor()
+                    if notes is not None:
+                        cursor.execute(
+                            "UPDATE shipments SET status = ?, notes = ? WHERE id = ?",
+                            (new_status, notes, shipment_id),
+                        )
+                    else:
+                        cursor.execute(
+                            "UPDATE shipments SET status = ? WHERE id = ?",
+                            (new_status, shipment_id),
+                        )
+                    conn.commit()
+                    logger.info(f"Estado de envío {shipment_id} actualizado a {new_status}")
+                    return True
+            except Exception as e:
+                logger.error(f"Error actualizando envío {shipment_id}: {e}")
+                return False
+
+    def delete_shipment(self, shipment_id: int) -> bool:
+        with self.lock:
+            try:
+                with self.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM shipments WHERE id = ?", (shipment_id,))
+                    conn.commit()
+                    logger.info(f"Envío {shipment_id} eliminado")
+                    return True
+            except Exception as e:
+                logger.error(f"Error eliminando envío {shipment_id}: {e}")
+                return False
+
