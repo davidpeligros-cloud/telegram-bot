@@ -95,6 +95,9 @@ class DealDatabase:
                     if "image_path" not in columns:
                         logger.info("Migrando esquema: agregando columna image_path")
                         cursor.execute("ALTER TABLE deals ADD COLUMN image_path TEXT")
+                    if "favorite" not in columns:
+                        logger.info("Migrando esquema: agregando columna favorite")
+                        cursor.execute("ALTER TABLE deals ADD COLUMN favorite INTEGER DEFAULT 0")
 
                     # Migración de esquema de shipments: añadir columnas si no existen.
                     cursor.execute("PRAGMA table_info(shipments)")
@@ -441,5 +444,21 @@ class DealDatabase:
                     return True
             except Exception as e:
                 logger.error(f"Error eliminando envío {shipment_id}: {e}")
+                return False
+
+    def toggle_favorite(self, deal_id: int, status: int) -> bool:
+        with self.lock:
+            try:
+                with self.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "UPDATE deals SET favorite = ? WHERE id = ?",
+                        (status, deal_id)
+                    )
+                    conn.commit()
+                    logger.info(f"Favorito de deal {deal_id} establecido a {status}")
+                    return True
+            except Exception as e:
+                logger.error(f"Error en toggle_favorite para deal {deal_id}: {e}")
                 return False
 

@@ -49,6 +49,7 @@ with st.sidebar:
     last_days = st.selectbox("Últimos días", [7, 14, 30, 90, 180], index=2)
     group_options = sorted(df["group_name"].dropna().unique().tolist()) if not df.empty else []
     selected_groups = st.multiselect("Grupos", group_options, default=group_options)
+    show_favorites = st.checkbox("⭐ Mostrar solo favoritos", value=False)
     date_range = st.date_input(
         "Rango de fechas",
         [datetime.now().date() - timedelta(days=last_days), datetime.now().date()],
@@ -120,6 +121,11 @@ if search_text:
     ]
 if selected_groups:
     filtered = filtered[filtered["group_name"].isin(selected_groups)]
+
+if "favorite" not in filtered.columns:
+    filtered["favorite"] = 0
+if show_favorites:
+    filtered = filtered[filtered["favorite"] == 1]
 
 stats_col1, stats_col2, stats_col3, stats_col4 = st.columns(4)
 stats_col1.metric("Deals totales", len(filtered))
@@ -201,7 +207,22 @@ with tab1:
                     st.write(f"🔥 Score: **{row['score']}** | 💰 Precio: **{row['price']}**")
                     st.write(f"📢 Grupo: *{row['group_name']}*")
                     st.write(f"📅 Fecha: `{row['date'].strftime('%d/%m/%Y %H:%M')}`")
-                    st.markdown(f"[🛍️ Ir a la Oferta]({row['link']})")
+                    
+                    # Botones de Acción (Oferta + Favorito)
+                    col_card1, col_card2 = st.columns([1.2, 1])
+                    with col_card1:
+                        st.markdown(f"[🛍️ Ir a la Oferta]({row['link']})")
+                    with col_card2:
+                        deal_id = int(row["id"])
+                        is_fav = int(row.get("favorite") or 0) == 1
+                        if is_fav:
+                            if st.button("❤️ Guardado", key=f"fav_btn_{deal_id}", use_container_width=True):
+                                db_manager.toggle_favorite(deal_id, 0)
+                                st.rerun()
+                        else:
+                            if st.button("🖤 Favorito", key=f"fav_btn_{deal_id}", use_container_width=True):
+                                db_manager.toggle_favorite(deal_id, 1)
+                                st.rerun()
                     st.markdown("---")
                     
     st.markdown("---")
