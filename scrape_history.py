@@ -9,6 +9,7 @@ from datetime import datetime, timezone, timedelta
 
 from dotenv import load_dotenv
 from telethon import TelegramClient
+from telethon.sessions import StringSession
 
 from database import DealDatabase
 from scoring import calculate_score, extract_links, extract_prices
@@ -26,7 +27,8 @@ load_dotenv()
 
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
-SESSION_NAME = os.getenv("TELETHON_SESSION", "session2")
+SESSION_NAME = os.getenv("TELETHON_SESSION", "data/session2")
+SESSION_STRING = os.getenv("TELETHON_SESSION_STRING", "")
 DATABASE_PATH = os.getenv("DATABASE_PATH", "data/deals.db")
 ALERT_MIN_SCORE = int(os.getenv("ALERT_MIN_SCORE", "60"))
 MESSAGES_LIMIT = 500  # Cuantos mensajes por grupo queremos leer del pasado
@@ -36,7 +38,11 @@ if not API_ID or not API_HASH:
     raise RuntimeError("Falta API_ID o API_HASH")
 
 db = DealDatabase(db_path=DATABASE_PATH)
-client = TelegramClient(SESSION_NAME, int(API_ID), API_HASH)
+
+if SESSION_STRING:
+    client = TelegramClient(StringSession(SESSION_STRING), int(API_ID), API_HASH)
+else:
+    client = TelegramClient(SESSION_NAME, int(API_ID), API_HASH)
 
 async def scrape_historical_data():
     logger.info("Iniciando escaneo histórico de mensajes...")

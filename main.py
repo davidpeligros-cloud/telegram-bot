@@ -13,6 +13,7 @@ from email.mime.text import MIMEText
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError
+from telethon.sessions import StringSession
 
 from database import DealDatabase
 from scoring import calculate_score, extract_links, extract_prices
@@ -45,6 +46,7 @@ CHAT_ID = os.getenv("CHAT_ID") or os.getenv("ALERT_CHAT_ID")
 ALERT_MIN_SCORE = int(os.getenv("ALERT_MIN_SCORE", "60"))
 DATABASE_PATH = os.getenv("DATABASE_PATH", "data/deals.db")
 SESSION_NAME = os.getenv("TELETHON_SESSION", "data/session2")
+SESSION_STRING = os.getenv("TELETHON_SESSION_STRING", "")
 
 if not API_ID or not API_HASH:
     logger.error("API_ID y API_HASH son obligatorios en .env")
@@ -60,7 +62,12 @@ db = DealDatabase(db_path=DATABASE_PATH)
 # TELEGRAM CLIENT
 # =========================
 
-client = TelegramClient(SESSION_NAME, int(API_ID), API_HASH)
+if SESSION_STRING:
+    logger.info("Usando StringSession desde variables de entorno.")
+    client = TelegramClient(StringSession(SESSION_STRING), int(API_ID), API_HASH)
+else:
+    logger.info("Usando sesión SQLite local.")
+    client = TelegramClient(SESSION_NAME, int(API_ID), API_HASH)
 
 # =========================
 # ANTI DUPLICADOS
