@@ -5,6 +5,7 @@ import sqlite3
 from dotenv import load_dotenv
 from telethon import TelegramClient
 from telethon.sessions import StringSession
+from database import DealDatabase
 
 # =========================
 # CONFIGURACIÓN
@@ -34,6 +35,8 @@ else:
 
 async def download_missing_images():
     logger.info("Iniciando la recuperación de imágenes faltantes...")
+    # Asegurar que las migraciones de base de datos se ejecutan
+    DealDatabase(db_path=DATABASE_PATH)
     await client.start()
     
     # 1. Obtener deals sin imagen pero con message_id y group_name
