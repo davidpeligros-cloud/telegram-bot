@@ -130,7 +130,7 @@ stats_col4.metric("Mejor score", int(filtered["score"].max() if not filtered.emp
 st.markdown("---")
 
 # Crear pestañas principales
-tab1, tab2, tab3 = st.tabs(["📈 Analíticas e Historial", "🎨 Galería de Ofertas", "📦 Gestión de Envíos"])
+tab1, tab2 = st.tabs(["📈 Analíticas e Historial", "📦 Gestión de Envíos"])
 
 with tab1:
     st.subheader("📈 Evolución de Deals (Últimos Días)")
@@ -164,39 +164,47 @@ with tab1:
                                     labels={'score': 'Score'}, color_discrete_sequence=['#FF4B4B'])
             st.plotly_chart(fig_hist, use_container_width=True)
     
-    st.subheader("🔥 Mejores deals")
-    top_deals = filtered.sort_values(by="score", ascending=False)
-    st.dataframe(
-        top_deals[["score", "price", "group_name", "date", "product", "link"]].head(25),
-        column_config={
-            "link": st.column_config.LinkColumn("🛍️ Enlace Directo", display_text="Ver Oferta"),
-            "score": "🔥 Score",
-            "price": "💰 Precio",
-            "group_name": "📢 Grupo",
-            "date": "📅 Fecha",
-            "product": "👟 Producto"
-        },
-        use_container_width=True,
-        hide_index=True,
-    )
-    
     st.markdown("---")
+    st.subheader("👟 Feed de Ofertas Cazadas")
     
-    st.subheader("📦 Todas las deals")
-    st.dataframe(
-        filtered[["date", "score", "price", "group_name", "product", "link"]].reset_index(drop=True),
-        column_config={
-            "link": st.column_config.LinkColumn("🛍️ Enlace Directo", display_text="Ver Oferta"),
-            "score": "🔥 Score",
-            "price": "💰 Precio",
-            "group_name": "📢 Grupo",
-            "date": "📅 Fecha",
-            "product": "👟 Producto"
-        },
-        use_container_width=True,
-        hide_index=True,
-    )
-    
+    if filtered.empty:
+        st.info("💡 No se han encontrado ofertas con los filtros actuales.")
+    else:
+        col_sort, col_limit = st.columns([2, 1])
+        with col_sort:
+            sort_by = st.selectbox("Ordenar feed por:", ["Más Recientes", "Mejor Score 🔥"])
+        with col_limit:
+            feed_limit = st.selectbox("Mostrar cantidad:", [12, 24, 48, 96], index=1)
+            
+        if sort_by == "Más Recientes":
+            display_deals = filtered.sort_values(by="date", ascending=False)
+        else:
+            display_deals = filtered.sort_values(by="score", ascending=False)
+            
+        display_deals = display_deals.head(feed_limit)
+        
+        # Grid de 3 columnas
+        cols = st.columns(3)
+        for i, (_, row) in enumerate(display_deals.iterrows()):
+            col = cols[i % 3]
+            with col:
+                with st.container():
+                    img_path = row["image_path"]
+                    # Si existe imagen descargada, la mostramos
+                    if img_path and os.path.exists(img_path):
+                        st.image(img_path, use_container_width=True)
+                    else:
+                        # Imagen de stock premium de zapatilla como fallback
+                        st.image("https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&q=80", use_container_width=True)
+                        
+                    st.markdown(f"#### {row['product'][:45]}...")
+                    st.write(f"🔥 Score: **{row['score']}** | 💰 Precio: **{row['price']}**")
+                    st.write(f"📢 Grupo: *{row['group_name']}*")
+                    st.write(f"📅 Fecha: `{row['date'].strftime('%d/%m/%Y %H:%M')}`")
+                    st.markdown(f"[🛍️ Ir a la Oferta]({row['link']})")
+                    st.markdown("---")
+                    
+    st.markdown("---")
     csv = filtered.to_csv(index=False).encode("utf-8")
     st.download_button(
         label="📥 Descargar CSV",
@@ -206,33 +214,6 @@ with tab1:
     )
 
 with tab2:
-    st.subheader("🎨 Galería Visual de Ofertas")
-    
-    # Filtrar solo ofertas que tengan imagen
-    deals_with_img = filtered[filtered["image_path"].notna() & (filtered["image_path"] != "")]
-    
-    if deals_with_img.empty:
-        st.info("💡 Las imágenes de las ofertas se descargarán automáticamente cuando el bot reciba mensajes con foto en Telegram. De momento no hay ninguna foto registrada.")
-    else:
-        # Mostrar en cuadrícula de 3 columnas
-        cols = st.columns(3)
-        for i, (_, row) in enumerate(deals_with_img.head(21).iterrows()):
-            col = cols[i % 3]
-            with col:
-                with st.container():
-                    img_path = row["image_path"]
-                    # Verificar si existe el archivo
-                    if os.path.exists(img_path):
-                        st.image(img_path, use_container_width=True)
-                    else:
-                        st.info("Imagen no disponible localmente")
-                    st.markdown(f"#### {row['product'][:40]}...")
-                    st.write(f"🔥 Score: **{row['score']}** | 💰 Precio: **{row['price']}**")
-                    st.write(f"📢 Grupo: *{row['group_name']}*")
-                    st.markdown(f"[🛍️ Ir a la Oferta]({row['link']})")
-                    st.markdown("---")
-
-with tab3:
     st.header("📦 Gestión de Envíos y Compras")
     
     # Obtener todos los envíos
