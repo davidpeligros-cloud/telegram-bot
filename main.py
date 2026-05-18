@@ -227,10 +227,19 @@ def generate_shipments_email_html(shipments) -> str:
 
 
 async def run_shipments_report_loop():
-    logger.info("Bucle de resumen de envíos iniciado (envíos activos diarios)")
+    logger.info("Bucle de resumen de envíos iniciado (envíos activos diarios a las 15:30)")
     while True:
-        # Esperar 24 horas entre envíos
-        await asyncio.sleep(24 * 3600)
+        now = datetime.now()
+        target = now.replace(hour=15, minute=30, second=0, microsecond=0)
+        
+        # Si ya ha pasado las 15:30 de hoy, programarlo para mañana
+        if now >= target:
+            target += timedelta(days=1)
+            
+        sleep_seconds = (target - now).total_seconds()
+        logger.info(f"Reporte diario de envíos programado para: {target} (en {sleep_seconds/3600:.1f} horas)")
+        
+        await asyncio.sleep(sleep_seconds)
         
         try:
             active_shipments = db.get_active_shipments()
@@ -259,6 +268,9 @@ async def run_shipments_report_loop():
                 logger.info("No hay envíos activos o faltan credenciales de email. Reporte omitido.")
         except Exception as e:
             logger.error(f"Error en bucle de reporte de envíos: {e}", exc_info=True)
+            
+        # Esperar 60 segundos extra para evitar dobles ejecuciones
+        await asyncio.sleep(60)
 
 
 
