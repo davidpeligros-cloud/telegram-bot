@@ -278,7 +278,7 @@ async def run_shipments_report_loop():
 async def handler(event) -> None:
     try:
         text = event.raw_text or ""
-        if len(text) < 20:
+        if text.startswith("/") or len(text) < 20:
             return
 
         links = extract_links(text)
@@ -356,6 +356,117 @@ async def handler(event) -> None:
 
     except Exception as e:
         logger.error(f"Error en handler: {e}", exc_info=True)
+
+
+@client.on(events.NewMessage(pattern=r'^/'))
+async def command_handler(event) -> None:
+    try:
+        # Solo procesar comandos en chats privados
+        if not event.is_private:
+            return
+
+        # Comprobar seguridad: solo responder si el remitente es el dueño o coincide con CHAT_ID
+        me = await client.get_me()
+        is_owner = event.sender_id == me.id
+        
+        is_authorized = is_owner
+        if not is_owner and CHAT_ID:
+            try:
+                # Si el CHAT_ID coincide con el sender_id del mensaje privado
+                if int(CHAT_ID) == event.sender_id:
+                    is_authorized = True
+            except Exception:
+                pass
+                
+        if not is_authorized:
+            logger.warning(f"Intento de comando no autorizado de user ID: {event.sender_id}")
+            return
+
+        text = event.raw_text.strip()
+        parts = text.split(" ", 1)
+        command = parts[0].lower()
+        args = parts[1] if len(parts) > 1 else ""
+
+        if command == "/help" or command == "/start":
+            help_text = (
+                "🤖 **Asistente Sneaker Bot**\n\n"
+                "Usa estos comandos desde nuestro chat privado:\n"
+                "• `/resumen` - Ver los 5 mejores chollos de las últimas 24h.\n"
+                "• `/envios` - Ver un resumen de tus paquetes activos.\n"
+                "• `/buscar <zapato>` - Buscar chollos en el historial.\n"
+                "• `/help` - Muestra esta ayuda."
+            )
+            await event.respond(help_text)
+            
+        elif command == "/resumen":
+            # Chollos últimas 24 horas (convertido a UTC)
+            one_day_ago = (datetime.now(timezone.utc) - timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S UTC')
+            with db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT product, link, price, score, group_name FROM deals WHERE date >= ? ORDER BY score DESC LIMIT 5",
+                    (one_day_ago,)
+                )
+                deals = cursor.fetchall()
+                
+            if not deals:
+                await event.respond("📭 No se han registrado chollos en las últimas 24 horas.")
+                return
+                
+            response = "🔥 **Top 5 Chollos (Últimas 24h)**:\n\n"
+            for product, link, price, score, group_name in deals:
+                response += f"• **{product[:50]}...**\n  💰 Precio: {price} | 🔥 Score: {score}\n  🛍️ [Ir a la oferta]({link})\n\n"
+            await event.respond(response, link_preview=False)
+            
+        elif command == "/envios":
+            active_shipments = db.get_active_shipments()
+            shipments_list = [dict(s) for s in active_shipments]
+            
+            if not shipments_list:
+                await event.respond("📦 No tienes ningún envío activo en tránsito en este momento.")
+                return
+                
+            response = "📦 **Tus Envíos Activos**:\n\n"
+            for s in shipments_list:
+                name = s['product_name']
+                carrier = s['carrier']
+                tracking = s['tracking_number']
+                status = s['status']
+                
+                status_emoji = "⏳"
+                if status == "Enviado":
+                    status_emoji = "🚚"
+                elif status == "En reparto":
+                    status_emoji = "🛵"
+                elif status == "Recibido":
+                    status_emoji = "✅"
+                    
+                response += f"• {status_emoji} **{name}**\n  🚚 {carrier} | 🔢 `{tracking}`\n  📍 Estado: **{status}**\n\n"
+            await event.respond(response)
+            
+        elif command == "/buscar":
+            if not args:
+                await event.respond("⚠️ Por favor introduce un término. Ej: `/buscar jordan`")
+                return
+                
+            deals = db.search_deals(args)
+            if not deals:
+                await event.respond(f"🔍 No se han encontrado chollos coincidentes con '{args}'.")
+                return
+                
+            # Tomar top 5
+            deals_sorted = sorted(deals, key=lambda x: x[4], reverse=True)[:5]
+            response = f"🔍 **Resultados para '{args}' (Top 5)**:\n\n"
+            for d in deals_sorted:
+                product = d[1]
+                link = d[2]
+                price = d[3]
+                score = d[4]
+                response += f"• **{product[:50]}...**\n  💰 Precio: {price} | 🔥 Score: {score}\n  🛍️ [Ir a la oferta]({link})\n\n"
+            await event.respond(response, link_preview=False)
+            
+    except Exception as e:
+        logger.error(f"Error procesando comando: {e}", exc_info=True)
 
 
 async def run_bot() -> None:

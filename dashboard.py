@@ -235,6 +235,49 @@ with tab2:
 with tab3:
     st.header("📦 Gestión de Envíos y Compras")
     
+    # Obtener todos los envíos
+    shipments = db_manager.get_all_shipments()
+    shipments_list = [dict(s) for s in shipments]
+    
+    # Mostrar KPIs Financieros en la parte superior si hay datos
+    if shipments_list:
+        shipments_df = pd.DataFrame(shipments_list)
+        
+        # Asegurar tipos flotantes
+        shipments_df["purchase_price"] = pd.to_numeric(shipments_df["purchase_price"], errors="coerce").fillna(0.0)
+        shipments_df["resell_price"] = pd.to_numeric(shipments_df["resell_price"], errors="coerce").fillna(0.0)
+        shipments_df["fees"] = pd.to_numeric(shipments_df["fees"], errors="coerce").fillna(0.0)
+        
+        # Calcular totales
+        total_investment = (shipments_df["purchase_price"] + shipments_df["fees"]).sum()
+        total_return = shipments_df["resell_price"].sum()
+        estimated_profit = total_return - total_investment
+        avg_roi = (estimated_profit / total_investment * 100) if total_investment > 0 else 0.0
+        
+        # Visualizar KPIs en 4 columnas
+        col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
+        col_kpi1.metric("💰 Inversión Total", f"{total_investment:,.2f} €", help="Suma de (Precio Compra + Tasas)")
+        col_kpi2.metric("📈 Retorno Esperado", f"{total_return:,.2f} €", help="Suma de precios de reventa estimados")
+        
+        profit_color = "normal" if estimated_profit >= 0 else "inverse"
+        col_kpi3.metric(
+            "💵 Beneficio Neto", 
+            f"{estimated_profit:,.2f} €",
+            delta=f"+{estimated_profit:,.2f} €" if estimated_profit >= 0 else f"{estimated_profit:,.2f} €",
+            delta_color=profit_color,
+            help="Beneficio neto total estimado de tu stock"
+        )
+        
+        roi_color = "normal" if avg_roi >= 0 else "inverse"
+        col_kpi4.metric(
+            "🎯 ROI Promedio", 
+            f"{avg_roi:.1f} %",
+            delta=f"+{avg_roi:.1f} %" if avg_roi >= 0 else f"{avg_roi:.1f} %",
+            delta_color=roi_color,
+            help="Retorno de inversión promedio de tus compras"
+        )
+        st.markdown("---")
+
     # Formulario para agregar un envío
     with st.expander("➕ Registrar Nueva Compra/Envío"):
         with st.form("new_shipment_form", clear_on_submit=True):
@@ -242,9 +285,13 @@ with tab3:
             with col1:
                 ship_product = st.text_input("Nombre del Producto (ej: Nike Jordan 4 Military)", value="")
                 ship_carrier = st.selectbox("Transportista", ["Correos", "Correos Express", "SEUR", "DHL", "Otro"])
+                ship_purchase = st.number_input("Precio de Compra (€)", min_value=0.0, value=0.0, step=1.0)
             with col2:
                 ship_tracking = st.text_input("Nº de Seguimiento / Tracking", value="")
-                ship_notes = st.text_area("Notas / Enlace de compra", value="", placeholder="Talla, precio, etc.")
+                ship_resell = st.number_input("Precio Estimado de Reventa (€)", min_value=0.0, value=0.0, step=1.0)
+                ship_fees = st.number_input("Tasas / Envío / Comisiones (€)", min_value=0.0, value=0.0, step=1.0)
+                
+            ship_notes = st.text_area("Notas / Enlace de compra", value="", placeholder="Talla, detalles de compra, etc.")
                 
             submitted = st.form_submit_button("Guardar Envío")
             if submitted:
@@ -256,7 +303,10 @@ with tab3:
                         carrier=ship_carrier,
                         tracking_number=ship_tracking,
                         status="Pedido",
-                        notes=ship_notes
+                        notes=ship_notes,
+                        purchase_price=ship_purchase,
+                        resell_price=ship_resell,
+                        fees=ship_fees
                     )
                     if saved:
                         st.success(f"¡Envío de '{ship_product}' registrado correctamente!")
@@ -264,17 +314,15 @@ with tab3:
                     else:
                         st.error("Error al guardar el envío en la base de datos.")
                         
-    # Obtener envíos
-    shipments = db_manager.get_all_shipments()
-    if not shipments:
+    # Mostrar envíos
+    if not shipments_list:
         st.info("No tienes ningún envío registrado todavía. ¡Usa el formulario de arriba para añadir uno!")
     else:
-        # Convertir a DataFrame para mostrarlo limpio
-        shipments_df = pd.DataFrame([dict(s) for s in shipments])
+        shipments_df = pd.DataFrame(shipments_list)
         
         # Generar enlaces oficiales de seguimiento automáticos en el DataFrame
         def get_tracking_link(row):
-            carrier = row["carrier"].lower()
+            carrier = str(row["carrier"]).lower()
             tracking = row["tracking_number"]
             if "correosexpress" in carrier or "correos express" in carrier:
                 return f"https://www.correosexpress.com/web/correosexpress/consultanos?numEnvio={tracking}"
@@ -312,13 +360,27 @@ with tab3:
             # Tarjeta de envío
             with st.container():
                 st.markdown(f"### {status_emoji} {ship_name} ({carrier})")
-                col_info, col_actions = st.columns([3, 2])
+                col_info, col_fin, col_actions = st.columns([2, 1.5, 1.5])
                 with col_info:
                     st.write(f"**Nº Seguimiento:** `{tracking}`")
                     st.write(f"**Estado actual:** `{status}`")
                     st.write(f"*Notas:* {notes}")
                     if track_url:
                         st.markdown(f"[🔗 Enlace Oficial de Rastreo ({carrier})]({track_url})")
+                with col_fin:
+                    st.write("**📊 Métricas de Reventa:**")
+                    cost = float(row.get("purchase_price") or 0.0)
+                    r_fees = float(row.get("fees") or 0.0)
+                    resell = float(row.get("resell_price") or 0.0)
+                    inv = cost + r_fees
+                    profit = resell - inv
+                    roi = (profit / inv * 100) if inv > 0 else 0.0
+                    
+                    st.write(f"💵 Compra: `{cost:,.2f} €` (+ `{r_fees:,.2f} €` tasas)")
+                    st.write(f"📈 Reventa: `{resell:,.2f} €`")
+                    
+                    profit_color = "green" if profit >= 0 else "red"
+                    st.markdown(f"💰 Beneficio: :{profit_color}[{profit:+,.2f} €] (ROI: `{roi:+.1f}%`) ")
                 with col_actions:
                     new_status = st.selectbox(
                         "Actualizar Estado", 

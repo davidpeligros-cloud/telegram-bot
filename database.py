@@ -72,6 +72,9 @@ class DealDatabase:
                             tracking_number TEXT NOT NULL,
                             status TEXT NOT NULL,
                             notes TEXT,
+                            purchase_price REAL DEFAULT 0.0,
+                            resell_price REAL DEFAULT 0.0,
+                            fees REAL DEFAULT 0.0,
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         )
                         """
@@ -92,6 +95,19 @@ class DealDatabase:
                     if "image_path" not in columns:
                         logger.info("Migrando esquema: agregando columna image_path")
                         cursor.execute("ALTER TABLE deals ADD COLUMN image_path TEXT")
+
+                    # Migración de esquema de shipments: añadir columnas si no existen.
+                    cursor.execute("PRAGMA table_info(shipments)")
+                    ship_columns = [row[1] for row in cursor.fetchall()]
+                    if "purchase_price" not in ship_columns:
+                        logger.info("Migrando esquema: agregando columna purchase_price a shipments")
+                        cursor.execute("ALTER TABLE shipments ADD COLUMN purchase_price REAL DEFAULT 0.0")
+                    if "resell_price" not in ship_columns:
+                        logger.info("Migrando esquema: agregando columna resell_price a shipments")
+                        cursor.execute("ALTER TABLE shipments ADD COLUMN resell_price REAL DEFAULT 0.0")
+                    if "fees" not in ship_columns:
+                        logger.info("Migrando esquema: agregando columna fees a shipments")
+                        cursor.execute("ALTER TABLE shipments ADD COLUMN fees REAL DEFAULT 0.0")
 
                     cursor.execute("CREATE INDEX IF NOT EXISTS idx_score ON deals(score DESC)")
                     cursor.execute("CREATE INDEX IF NOT EXISTS idx_date ON deals(date DESC)")
@@ -347,6 +363,9 @@ class DealDatabase:
         tracking_number: str,
         status: str = "Pedido",
         notes: Optional[str] = None,
+        purchase_price: float = 0.0,
+        resell_price: float = 0.0,
+        fees: float = 0.0,
     ) -> bool:
         with self.lock:
             try:
@@ -355,10 +374,10 @@ class DealDatabase:
                     cursor.execute(
                         """
                         INSERT INTO shipments (
-                            product_name, carrier, tracking_number, status, notes
-                        ) VALUES (?, ?, ?, ?, ?)
+                            product_name, carrier, tracking_number, status, notes, purchase_price, resell_price, fees
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (product_name, carrier, tracking_number, status, notes),
+                        (product_name, carrier, tracking_number, status, notes, purchase_price, resell_price, fees),
                     )
                     conn.commit()
                     logger.info(f"Envío guardado: {product_name} - {tracking_number}")
