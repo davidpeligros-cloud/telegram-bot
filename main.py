@@ -144,9 +144,9 @@ async def run_summary_loop():
         now = datetime.now()
         target = now.replace(hour=15, minute=30, second=0, microsecond=0)
         
-        # Si ya ha pasado las 15:30 de hoy, programarlo para dentro de 2 días
+        # Si ya ha pasado las 15:30 de hoy, programarlo para mañana
         if now >= target:
-            target += timedelta(days=2)
+            target += timedelta(days=1)
             
         # Guardar la fecha en un archivo para que el dashboard lo lea
         try:
@@ -156,7 +156,7 @@ async def run_summary_loop():
             logger.error(f"Error guardando fecha de resumen: {e}")
             
         sleep_seconds = (target - now).total_seconds()
-        logger.info(f"Resumen bisemanal programado para: {target} (en {sleep_seconds/3600:.1f} horas)")
+        logger.info(f"Resumen diario programado para: {target} (en {sleep_seconds/3600:.1f} horas)")
         
         await asyncio.sleep(sleep_seconds)
         

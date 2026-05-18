@@ -82,7 +82,7 @@ with st.sidebar:
                         minutes = int((diff.total_seconds() % 3600) // 60)
                         
                         st.metric(
-                            "Próximo Resumen Bisemanal", 
+                            "Próximo Resumen Diario", 
                             f"{hours}h {minutes}m", 
                             help=f"Programado para el {next_summary.strftime('%d/%m/%Y %H:%M')}"
                         )

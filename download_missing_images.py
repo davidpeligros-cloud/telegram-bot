@@ -39,6 +39,13 @@ async def download_missing_images():
     DealDatabase(db_path=DATABASE_PATH)
     await client.start()
     
+    logger.info("Obteniendo diálogos de Telegram para mapear canales...")
+    dialogs = await client.get_dialogs()
+    entity_map = {d.title: d.entity for d in dialogs}
+    for d in dialogs:
+        entity_map[str(d.id)] = d.entity
+        entity_map[d.id] = d.entity
+    
     # 1. Obtener deals sin imagen pero con message_id y group_name
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
@@ -73,9 +80,17 @@ async def download_missing_images():
         
         logger.info(f"Procesando Deal #{deal_id}: {product[:40]}... (Grupo: {group}, Msg ID: {msg_id})")
         
+        entity = entity_map.get(group)
+        if not entity:
+            entity = entity_map.get(str(group))
+            
+        if not entity:
+            logger.warning(f"No se pudo encontrar el canal/grupo '{group}' en tus diálogos de Telegram.")
+            continue
+            
         try:
-            # Obtener el mensaje usando Telethon
-            msg = await client.get_messages(group, ids=msg_id)
+            # Obtener el mensaje usando la entidad resuelta
+            msg = await client.get_messages(entity, ids=msg_id)
             if msg and msg.media:
                 logger.info(f"¡Media encontrado para Deal #{deal_id}! Descargando...")
                 downloaded = await msg.download_media(file="data/images/")
