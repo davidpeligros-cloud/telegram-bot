@@ -13,7 +13,6 @@ st.set_page_config(page_title="Sneaker Bot Dashboard", layout="wide")
 st.title("🔥 Sneaker Bot Dashboard")
 
 
-@st.cache_data
 def load_deals(db_path: str) -> pd.DataFrame:
     conn = sqlite3.connect(db_path, check_same_thread=False)
     try:
