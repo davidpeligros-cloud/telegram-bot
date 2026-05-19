@@ -57,8 +57,41 @@ def generate_telegram_text(deals):
     return text
 
 def send_summary_email(email_user, email_pass, html_content):
-    if not email_user or not email_pass:
-        logger.error("Credenciales de email no configuradas para el resumen.")
+    if not email_user:
+        logger.error("Destinatario de email (EMAIL_USER) no configurado.")
+        return
+        
+    resend_api_key = os.getenv("RESEND_API_KEY")
+    if resend_api_key:
+        try:
+            import urllib.request
+            import json
+            url = "https://api.resend.com/emails"
+            headers = {
+                "Authorization": f"Bearer {resend_api_key}",
+                "Content-Type": "application/json"
+            }
+            data = {
+                "from": "Sneaker Bot <onboarding@resend.dev>",
+                "to": [email_user],
+                "subject": "👟 Tu Resumen Diario de Sneakers",
+                "html": html_content
+            }
+            req = urllib.request.Request(
+                url, 
+                data=json.dumps(data).encode("utf-8"), 
+                headers=headers, 
+                method="POST"
+            )
+            with urllib.request.urlopen(req) as response:
+                logger.info("Email de resumen enviado con éxito via Resend")
+            return
+        except Exception as e:
+            logger.error(f"Error enviando email de resumen via Resend: {e}")
+            logger.info("Intentando fallback SMTP para resumen...")
+
+    if not email_pass:
+        logger.error("Credenciales SMTP no completas para el resumen.")
         return
         
     try:
@@ -75,9 +108,9 @@ def send_summary_email(email_user, email_pass, html_content):
             server.login(email_user, email_pass)
             server.send_message(msg)
             
-        logger.info("Email de resumen enviado con éxito")
+        logger.info("Email de resumen enviado con éxito via SMTP")
     except Exception as e:
-        logger.error(f"Error enviando email de resumen: {e}")
+        logger.error(f"Error enviando email de resumen via SMTP: {e}")
 
 async def execute_summary(client, db, chat_id, email_user, email_pass):
     logger.info("Iniciando generación de resumen bisemanal...")

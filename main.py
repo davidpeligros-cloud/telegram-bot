@@ -81,8 +81,42 @@ sent_links = set()
 # =========================
 
 def send_email(subject: str, body: str) -> None:
-    if not EMAIL_USER or not EMAIL_PASS:
-        logger.debug("Email no enviado: credenciales no configuradas")
+    if not EMAIL_USER:
+        logger.debug("Email no enviado: destinatario (EMAIL_USER) no configurado")
+        return
+
+    resend_api_key = os.getenv("RESEND_API_KEY")
+    if resend_api_key:
+        try:
+            import urllib.request
+            import json
+            url = "https://api.resend.com/emails"
+            headers = {
+                "Authorization": f"Bearer {resend_api_key}",
+                "Content-Type": "application/json"
+            }
+            html_body = f"<div style='font-family: sans-serif; white-space: pre-wrap;'>{body}</div>"
+            data = {
+                "from": "Sneaker Bot <onboarding@resend.dev>",
+                "to": [EMAIL_USER],
+                "subject": subject,
+                "html": html_body
+            }
+            req = urllib.request.Request(
+                url, 
+                data=json.dumps(data).encode("utf-8"), 
+                headers=headers, 
+                method="POST"
+            )
+            with urllib.request.urlopen(req) as response:
+                logger.info("Email enviado con éxito via Resend")
+            return
+        except Exception as e:
+            logger.error(f"Error enviando email via Resend: {e}")
+            logger.info("Intentando fallback SMTP...")
+
+    if not EMAIL_PASS:
+        logger.debug("Email no enviado: credenciales SMTP no configuradas")
         return
 
     try:
@@ -96,9 +130,9 @@ def send_email(subject: str, body: str) -> None:
             server.login(EMAIL_USER, EMAIL_PASS)
             server.send_message(msg)
 
-        logger.info("Email enviado con éxito")
+        logger.info("Email enviado con éxito via SMTP")
     except Exception as e:
-        logger.error(f"Error enviando email: {e}")
+        logger.error(f"Error enviando email via SMTP: {e}")
 
 
 def format_alert_message(link: str, score: int, price_text: str, product: str, group_name: str, message_date: str) -> str:
