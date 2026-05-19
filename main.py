@@ -139,9 +139,11 @@ async def periodic_cleanup(days: int = 90, interval_hours: int = 24) -> None:
 
 async def run_summary_loop():
     from send_summary import execute_summary
+    from zoneinfo import ZoneInfo
+    madrid_tz = ZoneInfo("Europe/Madrid")
     
     while True:
-        now = datetime.now()
+        now = datetime.now(madrid_tz)
         target = now.replace(hour=15, minute=30, second=0, microsecond=0)
         
         # Si ya ha pasado las 15:30 de hoy, programarlo para mañana
@@ -228,8 +230,10 @@ def generate_shipments_email_html(shipments) -> str:
 
 async def run_shipments_report_loop():
     logger.info("Bucle de resumen de envíos iniciado (envíos activos diarios a las 15:30)")
+    from zoneinfo import ZoneInfo
+    madrid_tz = ZoneInfo("Europe/Madrid")
     while True:
-        now = datetime.now()
+        now = datetime.now(madrid_tz)
         target = now.replace(hour=15, minute=30, second=0, microsecond=0)
         
         # Si ya ha pasado las 15:30 de hoy, programarlo para mañana

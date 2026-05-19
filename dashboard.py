@@ -74,8 +74,10 @@ with st.sidebar:
             with open(next_summary_path, "r") as f:
                 next_summary_str = f.read().strip()
                 if next_summary_str:
+                    from zoneinfo import ZoneInfo
+                    madrid_tz = ZoneInfo("Europe/Madrid")
                     next_summary = datetime.fromisoformat(next_summary_str)
-                    now_time = datetime.now()
+                    now_time = datetime.now(madrid_tz)
                     if next_summary > now_time:
                         diff = next_summary - now_time
                         hours = int(diff.total_seconds() // 3600)

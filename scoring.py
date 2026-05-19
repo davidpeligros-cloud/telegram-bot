@@ -83,10 +83,9 @@ HOT_TERMS = {
     "promo": 10,
 }
 
-# Unificar en una sola regex para evitar que decimales se traten como números independientes
 PRICE_REGEX = re.compile(
-    r"\b(\d+(?:[.,]\d{1,2})?)\s*(?:€|\$|£|GBP|USD|EUR)\b|"
-    r"(?:€|\$|£|GBP|USD|EUR)\s*\b(\d+(?:[.,]\d{1,2})?)\b",
+    r"(?:(?:€|\$|£|GBP|USD|EUR)\s*(\d+(?:[.,]\d{1,2})?)\b)|"
+    r"(?:\b(\d+(?:[.,]\d{1,2})?)\s*(?:€|\$|£|GBP|USD|EUR))",
     re.IGNORECASE
 )
 
