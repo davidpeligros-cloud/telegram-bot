@@ -117,6 +117,28 @@ class DealDatabase:
                     cursor.execute("CREATE INDEX IF NOT EXISTS idx_group ON deals(group_name)")
                     cursor.execute("CREATE INDEX IF NOT EXISTS idx_link ON deals(link)")
                     cursor.execute("CREATE INDEX IF NOT EXISTS idx_created ON deals(created_at DESC)")
+                    
+                    # Limpieza automática de precios con decimales duplicados del historial
+                    try:
+                        import re
+                        cursor.execute("SELECT id, price FROM deals WHERE price LIKE '%,%' OR price LIKE '%.%'")
+                        rows = cursor.fetchall()
+                        cleaned_count = 0
+                        dup_pattern = re.compile(r"^(\d+[.,]\d{1,2}),\s*\d{1,2}$")
+                        for row in rows:
+                            deal_id = row['id']
+                            old_price = row['price']
+                            if old_price:
+                                match = dup_pattern.match(old_price)
+                                if match:
+                                    new_price = match.group(1)
+                                    cursor.execute("UPDATE deals SET price = ? WHERE id = ?", (new_price, deal_id))
+                                    cleaned_count += 1
+                        if cleaned_count > 0:
+                            logger.info(f"Limpieza de base de datos: Corregidos {cleaned_count} precios con decimales duplicados.")
+                    except Exception as ex:
+                        logger.error(f"Error en migración de limpieza de precios: {ex}")
+                        
                     conn.commit()
                     logger.info("Tablas e índices creados correctamente")
             except Exception as e:
