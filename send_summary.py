@@ -63,7 +63,7 @@ def send_summary_email(email_user, email_pass, html_content):
         
     try:
         msg = MIMEMultipart("alternative")
-        msg["Subject"] = "👟 Tu Resumen Bisemanal de Sneakers"
+        msg["Subject"] = "👟 Tu Resumen Diario de Sneakers"
         msg["From"] = email_user
         msg["To"] = email_user
         
