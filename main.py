@@ -93,7 +93,8 @@ def send_email(subject: str, body: str) -> None:
             url = "https://api.resend.com/emails"
             headers = {
                 "Authorization": f"Bearer {resend_api_key}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             }
             html_body = f"<div style='font-family: sans-serif; white-space: pre-wrap;'>{body}</div>"
             data = {
