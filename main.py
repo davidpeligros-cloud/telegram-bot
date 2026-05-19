@@ -144,9 +144,9 @@ async def run_summary_loop():
     
     while True:
         now = datetime.now(madrid_tz)
-        target = now.replace(hour=15, minute=30, second=0, microsecond=0)
+        target = now.replace(hour=16, minute=0, second=0, microsecond=0)
         
-        # Si ya ha pasado las 15:30 de hoy, programarlo para mañana
+        # Si ya ha pasado las 16:00 de hoy, programarlo para mañana
         if now >= target:
             target += timedelta(days=1)
             
@@ -229,14 +229,14 @@ def generate_shipments_email_html(shipments) -> str:
 
 
 async def run_shipments_report_loop():
-    logger.info("Bucle de resumen de envíos iniciado (envíos activos diarios a las 15:30)")
+    logger.info("Bucle de resumen de envíos iniciado (envíos activos diarios a las 16:00)")
     from zoneinfo import ZoneInfo
     madrid_tz = ZoneInfo("Europe/Madrid")
     while True:
         now = datetime.now(madrid_tz)
-        target = now.replace(hour=15, minute=30, second=0, microsecond=0)
+        target = now.replace(hour=16, minute=0, second=0, microsecond=0)
         
-        # Si ya ha pasado las 15:30 de hoy, programarlo para mañana
+        # Si ya ha pasado las 16:00 de hoy, programarlo para mañana
         if now >= target:
             target += timedelta(days=1)
             
