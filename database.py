@@ -83,6 +83,15 @@ class DealDatabase:
                         )
                         """
                     )
+                    
+                    cursor.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS processed_emails (
+                            email_uid TEXT PRIMARY KEY,
+                            processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                        """
+                    )
 
                     # Migración de esquema: añadir columnas si no existen.
                     cursor.execute("PRAGMA table_info(deals)")
@@ -557,5 +566,28 @@ class DealDatabase:
                     return True
             except Exception as e:
                 logger.error(f"Error en toggle_favorite para deal {deal_id}: {e}")
+                return False
+
+    def is_email_processed(self, email_uid: str) -> bool:
+        with self.lock:
+            try:
+                with self.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT 1 FROM processed_emails WHERE email_uid = ?", (email_uid,))
+                    return cursor.fetchone() is not None
+            except Exception as e:
+                logger.error(f"Error comprobando si email fue procesado: {e}")
+                return False
+
+    def mark_email_processed(self, email_uid: str) -> bool:
+        with self.lock:
+            try:
+                with self.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT OR IGNORE INTO processed_emails (email_uid) VALUES (?)", (email_uid,))
+                    conn.commit()
+                    return True
+            except Exception as e:
+                logger.error(f"Error marcando email como procesado: {e}")
                 return False
 

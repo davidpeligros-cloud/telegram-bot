@@ -9,7 +9,11 @@ import os
 import smtplib
 from datetime import datetime, timezone, timedelta
 from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import imaplib
+import email
+from email.header import decode_header
+import re
+import html
 
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
@@ -316,6 +320,280 @@ async def run_shipments_report_loop():
         await asyncio.sleep(60)
 
 
+# ==========================================
+# EMAIL PARSER & LISTENER DAEMON (HACOO)
+# ==========================================
+
+def clean_html_body(html_content: str) -> str:
+    text = re.sub(r'(?i)<br\s*/?>', '\n', html_content)
+    text = re.sub(r'(?i)</p>', '\n', text)
+    text = re.sub(r'(?i)</td>', '\t', text)
+    text = re.sub(r'(?i)</tr>', '\n', text)
+    text = re.sub(r'<[^>]+>', '', text)
+    text = html.unescape(text)
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r'\n\s*\n', '\n', text)
+    return text.strip()
+
+def decode_header_val(header_str) -> str:
+    if not header_str:
+        return ""
+    try:
+        parts = decode_header(header_str)
+        decoded = ""
+        for part, encoding in parts:
+            if isinstance(part, bytes):
+                decoded += part.decode(encoding or "utf-8", errors="ignore")
+            else:
+                decoded += str(part)
+        return decoded
+    except Exception:
+        return str(header_str)
+
+def fetch_emails_sync() -> list:
+    """
+    Conecta a Gmail via IMAP, busca correos de Hacoo/Saramart,
+    y devuelve una lista de diccionarios con la información de los correos nuevos.
+    """
+    results = []
+    if not EMAIL_USER or not EMAIL_PASS:
+        return results
+        
+    try:
+        mail = imaplib.IMAP4_SSL("imap.gmail.com")
+        mail.login(EMAIL_USER, EMAIL_PASS)
+        
+        # Carpetas a comprobar
+        folders = ["INBOX", "[Gmail]/Todos", "[Gmail]/Spam"]
+        
+        for folder in folders:
+            try:
+                status, _ = mail.select(f'"{folder}"', readonly=True)
+                if status != "OK":
+                    continue
+                
+                # Buscar correos de Hacoo o Saramart en el cuerpo o asunto
+                status, messages = mail.search(None, '(OR TEXT "Hacoo" TEXT "Saramart")')
+                if status != "OK":
+                    continue
+                
+                mail_ids = messages[0].split()
+                # Tomar los 15 más recientes de esta carpeta
+                for mail_id in mail_ids[-15:]:
+                    try:
+                        status, data = mail.fetch(mail_id, "(RFC822)")
+                        if status != "OK":
+                            continue
+                        
+                        raw_email = data[0][1]
+                        msg = email.message_from_bytes(raw_email)
+                        
+                        msg_id = msg.get("Message-ID")
+                        if not msg_id:
+                            msg_id = f"{msg.get('Date')}_{msg.get('Subject')}"
+                            
+                        subject = decode_header_val(msg["Subject"])
+                        sender = decode_header_val(msg["From"])
+                        date_val = msg["Date"]
+                        
+                        body = ""
+                        if msg.is_multipart():
+                            for part in msg.walk():
+                                content_type = part.get_content_type()
+                                content_disposition = str(part.get("Content-Disposition"))
+                                if content_type == "text/plain" and "attachment" not in content_disposition:
+                                    body = part.get_payload(decode=True).decode("utf-8", errors="ignore")
+                                    break
+                                elif content_type == "text/html" and "attachment" not in content_disposition:
+                                    body = part.get_payload(decode=True).decode("utf-8", errors="ignore")
+                        else:
+                            body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
+                            
+                        if "<html>" in body.lower() or "<div" in body.lower() or "<body" in body.lower():
+                            body = clean_html_body(body)
+                            
+                        results.append({
+                            "msg_id": msg_id,
+                            "subject": subject,
+                            "sender": sender,
+                            "date": date_val,
+                            "body": body
+                        })
+                    except Exception as e:
+                        logger.error(f"Error procesando correo individual en {folder}: {e}")
+            except Exception as e:
+                logger.error(f"Error accediendo a carpeta {folder}: {e}")
+        mail.logout()
+    except Exception as e:
+        logger.error(f"Error general en fetch_emails_sync: {e}")
+    return results
+
+async def check_and_parse_emails() -> int:
+    """
+    Comprueba los correos de compra/envío de Hacoo/Saramart.
+    Devuelve la cantidad de correos nuevos procesados.
+    """
+    logger.info("Buscando correos de compras/envíos en Gmail...")
+    emails = await asyncio.to_thread(fetch_emails_sync)
+    processed_count = 0
+    
+    for em in emails:
+        msg_id = em["msg_id"]
+        
+        # Comprobar si ya procesamos este correo
+        if db.is_email_processed(msg_id):
+            continue
+            
+        body = em["body"]
+        subject = em["subject"]
+        
+        # --- PARSER DE HACOO / SARAMART ---
+        order_match = re.search(r'(?:pedido|pedido\.|pedido:)\s*(\d{10,})', body, re.IGNORECASE)
+        if not order_match:
+            order_match = re.search(r'(?:Nº\s*de\s*pedido\.?|Nº\s*pedido\.?)\s*\n?\s*(\d{10,})', body, re.IGNORECASE)
+            
+        order_num = order_match.group(1) if order_match else None
+        
+        if order_num:
+            is_confirmation = any(x in body.lower() or x in subject.lower() for x in ["confirmado", "pago del pedido", "gracias por elegir", "hemos recibido tu pago"])
+            is_shipping = any(x in body.lower() or x in subject.lower() for x in ["enviado", "seguimiento", "tracking", "código de envío", "su paquete ha sido"])
+            
+            if is_confirmation:
+                # Nombre de producto
+                prod_match = re.search(r'(?:Resumen de la orden|Resumen del pedido|Resumen de la compra)\s*\n\s*(.*?)\s*\n', body, re.IGNORECASE)
+                product_name = prod_match.group(1).strip() if prod_match else None
+                
+                if not product_name:
+                    lines = body.split("\n")
+                    for i, line in enumerate(lines):
+                        if "talla:" in line.lower() and i > 0:
+                            product_name = lines[i-1].strip()
+                            break
+                if not product_name:
+                    product_name = f"Pedido Hacoo {order_num}"
+                    
+                size_match = re.search(r'(?:Talla|Size):\s*(\w+)', body, re.IGNORECASE)
+                size = size_match.group(1).strip() if size_match else None
+                
+                style_match = re.search(r'(?:Estilo|Style):\s*(.*?)\s*\n', body, re.IGNORECASE)
+                style = style_match.group(1).strip() if style_match else ""
+                
+                price_match = re.search(r'(?:Producto total|Total del producto|Precio del producto)\s*[\t ]*\s*([\d,.]+)\s*€', body, re.IGNORECASE)
+                purchase_price = 0.0
+                if price_match:
+                    purchase_price = float(price_match.group(1).replace(",", "."))
+                    
+                fees_match = re.search(r'(?:Costo de envío|Gastos de envío|Envío)\s*[\t ]*\s*([\d,.]+)\s*€', body, re.IGNORECASE)
+                fees = 0.0
+                if fees_match:
+                    fees = float(fees_match.group(1).replace(",", "."))
+                    
+                # Evitar guardar si ya existe el pedido registrado
+                already_exists = False
+                all_shipments = db.get_all_shipments()
+                for s in all_shipments:
+                    s_dict = dict(s)
+                    if s_dict["tracking_number"] == order_num or (s_dict["notes"] and order_num in s_dict["notes"]):
+                        already_exists = True
+                        break
+                        
+                if not already_exists:
+                    saved = db.save_shipment(
+                        product_name=product_name,
+                        carrier="Hacoo",
+                        tracking_number=order_num,
+                        status="Pedido",
+                        notes=f"Nº de pedido: {order_num}. Estilo: {style}",
+                        purchase_price=purchase_price,
+                        resell_price=purchase_price * 1.5,
+                        fees=fees,
+                        size=size,
+                        store="Hacoo"
+                    )
+                    if saved:
+                        logger.info(f"Pedido Hacoo {order_num} importado desde email con éxito!")
+                        alert_text = (
+                            f"📦 **Nueva compra detectada en tu correo**\n\n"
+                            f"👟 **{product_name}**\n"
+                            f"📏 Talla: `{size or 'N/A'}`\n"
+                            f"💰 Compra: `{purchase_price:.2f} €` (+ `{fees:.2f} €` envío)\n"
+                            f"🏪 Tienda: `Hacoo`\n"
+                            f"🔢 Pedido: `{order_num}`\n\n"
+                            f"Registrado automáticamente en tu inventario."
+                        )
+                        try:
+                            await client.send_message(int(CHAT_ID), alert_text)
+                        except Exception as te:
+                            logger.error(f"Error enviando alerta de Telegram: {te}")
+                        processed_count += 1
+                        
+            elif is_shipping:
+                tracking_match = re.search(r'(?:tracking|seguimiento|código|nº de envío|nº envío):\s*(\w+)', body, re.IGNORECASE)
+                if not tracking_match:
+                    tracking_match = re.search(r'\b([A-Z]{2}\d{9}[A-Z]{2}|\d{16,24}|[A-Z0-9]{12,24})\b', body)
+                    
+                new_tracking = tracking_match.group(1) if tracking_match else None
+                
+                carrier_name = "Correos"
+                for c in ["Correos Express", "Correos", "SEUR", "DHL", "GLS", "UPS", "FedEx", "Mondial Relay", "InPost", "Nacex"]:
+                    if c.lower() in body.lower():
+                        carrier_name = c
+                        break
+                        
+                if new_tracking and new_tracking != order_num:
+                    matched_shipment = None
+                    all_shipments = db.get_all_shipments()
+                    for s in all_shipments:
+                        s_dict = dict(s)
+                        if s_dict["tracking_number"] == order_num or (s_dict["notes"] and order_num in s_dict["notes"]):
+                            matched_shipment = s_dict
+                            break
+                            
+                    if matched_shipment:
+                        if matched_shipment["status"] not in ["En tránsito", "En reparto", "En Stock", "Vendido"]:
+                            success = db.update_shipment_status(
+                                shipment_id=matched_shipment["id"],
+                                new_status="En tránsito",
+                                tracking_number=new_tracking,
+                                carrier=carrier_name
+                            )
+                            if success:
+                                logger.info(f"Envío de pedido Hacoo {order_num} actualizado a En tránsito con tracking {new_tracking}.")
+                                alert_text = (
+                                    f"🚚 **¡Tu pedido ya ha sido enviado!**\n\n"
+                                    f"👟 **{matched_shipment['product_name']}**\n"
+                                    f"📦 Transportista: `{carrier_name}`\n"
+                                    f"🔢 Tracking: `{new_tracking}`\n\n"
+                                    f"Actualizado automáticamente en tu inventario."
+                                )
+                                try:
+                                    await client.send_message(int(CHAT_ID), alert_text)
+                                except Exception as te:
+                                    logger.error(f"Error enviando alerta de Telegram: {te}")
+                                processed_count += 1
+                                
+        db.mark_email_processed(msg_id)
+        
+    return processed_count
+
+async def run_email_listener_loop() -> None:
+    logger.info("Bucle de escucha de correos de compras/envíos iniciado (cada 10 minutos)")
+    if not EMAIL_USER or not EMAIL_PASS:
+        logger.warning("Falta EMAIL_USER o EMAIL_PASS en el entorno. Escucha de correos desactivada.")
+        return
+        
+    # Esperar 30 segundos al inicio
+    await asyncio.sleep(30)
+    
+    while True:
+        try:
+            await check_and_parse_emails()
+        except Exception as e:
+            logger.error(f"Error en run_email_listener_loop: {e}")
+            
+        await asyncio.sleep(600)
+
+
 
 @client.on(events.NewMessage)
 async def handler(event) -> None:
@@ -404,6 +682,7 @@ async def handler(event) -> None:
 @client.on(events.NewMessage(pattern=r'^/'))
 async def command_handler(event) -> None:
     try:
+        logger.info(f"Comando recibido: '{event.raw_text}' de sender_id: {event.sender_id} (is_private: {event.is_private})")
         # Solo procesar comandos en chats privados
         if not event.is_private:
             return
@@ -438,6 +717,7 @@ async def command_handler(event) -> None:
                 "• `/envios` - Ver un resumen de tus paquetes activos.\n"
                 "• `/buscar <zapato>` - Buscar chollos en el historial.\n"
                 "• `/probar_correo` - Fuerza el envío del email diario ahora mismo.\n"
+                "• `/probar_lector` - Fuerza la búsqueda de nuevos pedidos en tu Gmail ahora mismo.\n"
                 "• `/help` - Muestra esta ayuda."
             )
             await event.respond(help_text)
@@ -470,6 +750,14 @@ async def command_handler(event) -> None:
                 await event.respond("✅ Resumen diario ejecutado y enviado.")
             except Exception as e:
                 await event.respond(f"❌ Error al enviar el correo: {e}")
+                
+        elif command == "/probar_lector":
+            await event.respond("⚡ Buscando y procesando correos de compras/envíos en Gmail...")
+            try:
+                processed = await check_and_parse_emails()
+                await event.respond(f"✅ Búsqueda finalizada. Se han procesado e importado {processed} nuevos correos de compras/envíos.")
+            except Exception as e:
+                await event.respond(f"❌ Error al procesar correos: {e}")
             
         elif command == "/envios":
             active_shipments = db.get_active_shipments()
@@ -532,6 +820,7 @@ async def run_bot() -> None:
             asyncio.create_task(periodic_cleanup())
             asyncio.create_task(run_summary_loop())
             asyncio.create_task(run_shipments_report_loop())
+            asyncio.create_task(run_email_listener_loop())
             await client.run_until_disconnected()
         except SessionPasswordNeededError:
             logger.error("La sesión requiere contraseña de dos factores. Verifica tu cuenta de Telegram.")
