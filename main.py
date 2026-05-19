@@ -398,6 +398,7 @@ async def command_handler(event) -> None:
                 "• `/resumen` - Ver los 5 mejores chollos de las últimas 24h.\n"
                 "• `/envios` - Ver un resumen de tus paquetes activos.\n"
                 "• `/buscar <zapato>` - Buscar chollos en el historial.\n"
+                "• `/probar_correo` - Fuerza el envío del email diario ahora mismo.\n"
                 "• `/help` - Muestra esta ayuda."
             )
             await event.respond(help_text)
@@ -421,6 +422,15 @@ async def command_handler(event) -> None:
             for product, link, price, score, group_name in deals:
                 response += f"• **{product[:50]}...**\n  💰 Precio: {price} | 🔥 Score: {score}\n  🛍️ [Ir a la oferta]({link})\n\n"
             await event.respond(response, link_preview=False)
+            
+        elif command == "/probar_correo":
+            await event.respond("⚡ Iniciando envío manual de resumen diario por correo...")
+            from send_summary import execute_summary
+            try:
+                await execute_summary(client, db, CHAT_ID, EMAIL_USER, EMAIL_PASS)
+                await event.respond("✅ Resumen diario ejecutado y enviado.")
+            except Exception as e:
+                await event.respond(f"❌ Error al enviar el correo: {e}")
             
         elif command == "/envios":
             active_shipments = db.get_active_shipments()
