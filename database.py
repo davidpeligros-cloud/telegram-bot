@@ -75,6 +75,10 @@ class DealDatabase:
                             purchase_price REAL DEFAULT 0.0,
                             resell_price REAL DEFAULT 0.0,
                             fees REAL DEFAULT 0.0,
+                            size TEXT,
+                            store TEXT,
+                            sold_platform TEXT,
+                            sold_at TEXT,
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         )
                         """
@@ -111,6 +115,18 @@ class DealDatabase:
                     if "fees" not in ship_columns:
                         logger.info("Migrando esquema: agregando columna fees a shipments")
                         cursor.execute("ALTER TABLE shipments ADD COLUMN fees REAL DEFAULT 0.0")
+                    if "size" not in ship_columns:
+                        logger.info("Migrando esquema: agregando columna size a shipments")
+                        cursor.execute("ALTER TABLE shipments ADD COLUMN size TEXT")
+                    if "store" not in ship_columns:
+                        logger.info("Migrando esquema: agregando columna store a shipments")
+                        cursor.execute("ALTER TABLE shipments ADD COLUMN store TEXT")
+                    if "sold_platform" not in ship_columns:
+                        logger.info("Migrando esquema: agregando columna sold_platform a shipments")
+                        cursor.execute("ALTER TABLE shipments ADD COLUMN sold_platform TEXT")
+                    if "sold_at" not in ship_columns:
+                        logger.info("Migrando esquema: agregando columna sold_at a shipments")
+                        cursor.execute("ALTER TABLE shipments ADD COLUMN sold_at TEXT")
 
                     cursor.execute("CREATE INDEX IF NOT EXISTS idx_score ON deals(score DESC)")
                     cursor.execute("CREATE INDEX IF NOT EXISTS idx_date ON deals(date DESC)")
@@ -391,6 +407,10 @@ class DealDatabase:
         purchase_price: float = 0.0,
         resell_price: float = 0.0,
         fees: float = 0.0,
+        size: Optional[str] = None,
+        store: Optional[str] = None,
+        sold_platform: Optional[str] = None,
+        sold_at: Optional[str] = None,
     ) -> bool:
         with self.lock:
             try:
@@ -399,10 +419,10 @@ class DealDatabase:
                     cursor.execute(
                         """
                         INSERT INTO shipments (
-                            product_name, carrier, tracking_number, status, notes, purchase_price, resell_price, fees
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            product_name, carrier, tracking_number, status, notes, purchase_price, resell_price, fees, size, store, sold_platform, sold_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (product_name, carrier, tracking_number, status, notes, purchase_price, resell_price, fees),
+                        (product_name, carrier, tracking_number, status, notes, purchase_price, resell_price, fees, size, store, sold_platform, sold_at),
                     )
                     conn.commit()
                     logger.info(f"Envío guardado: {product_name} - {tracking_number}")
@@ -427,29 +447,84 @@ class DealDatabase:
             try:
                 with self.get_connection() as conn:
                     cursor = conn.cursor()
-                    cursor.execute("SELECT * FROM shipments WHERE status != 'Recibido' ORDER BY created_at DESC")
+                    cursor.execute("SELECT * FROM shipments WHERE status NOT IN ('En Stock', 'Recibido', 'Vendido') ORDER BY created_at DESC")
                     return cursor.fetchall()
             except Exception as e:
                 logger.error(f"Error obteniendo envíos activos: {e}")
                 return []
 
-    def update_shipment_status(self, shipment_id: int, new_status: str, notes: Optional[str] = None) -> bool:
+    def update_shipment_status(
+        self,
+        shipment_id: int,
+        new_status: str,
+        notes: Optional[str] = None,
+        sold_platform: Optional[str] = None,
+        sold_at: Optional[str] = None,
+        size: Optional[str] = None,
+        store: Optional[str] = None,
+        purchase_price: Optional[float] = None,
+        resell_price: Optional[float] = None,
+        fees: Optional[float] = None,
+        tracking_number: Optional[str] = None,
+        carrier: Optional[str] = None,
+    ) -> bool:
         with self.lock:
             try:
                 with self.get_connection() as conn:
                     cursor = conn.cursor()
+                    
+                    # Si el estado es Vendido y no se ha especificado fecha, la rellenamos automáticamente
+                    if new_status == "Vendido" and not sold_at:
+                        from datetime import datetime
+                        sold_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    elif new_status != "Vendido":
+                        sold_at = None
+                        sold_platform = None
+
+                    # Construir consulta dinámica para actualizar cualquier campo enviado
+                    update_fields = []
+                    params = []
+                    
+                    update_fields.append("status = ?")
+                    params.append(new_status)
+                    
                     if notes is not None:
-                        cursor.execute(
-                            "UPDATE shipments SET status = ?, notes = ? WHERE id = ?",
-                            (new_status, notes, shipment_id),
-                        )
-                    else:
-                        cursor.execute(
-                            "UPDATE shipments SET status = ? WHERE id = ?",
-                            (new_status, shipment_id),
-                        )
+                        update_fields.append("notes = ?")
+                        params.append(notes)
+                    if sold_platform is not None or new_status != "Vendido":
+                        update_fields.append("sold_platform = ?")
+                        params.append(sold_platform)
+                    if sold_at is not None or new_status != "Vendido":
+                        update_fields.append("sold_at = ?")
+                        params.append(sold_at)
+                    if size is not None:
+                        update_fields.append("size = ?")
+                        params.append(size)
+                    if store is not None:
+                        update_fields.append("store = ?")
+                        params.append(store)
+                    if purchase_price is not None:
+                        update_fields.append("purchase_price = ?")
+                        params.append(purchase_price)
+                    if resell_price is not None:
+                        update_fields.append("resell_price = ?")
+                        params.append(resell_price)
+                    if fees is not None:
+                        update_fields.append("fees = ?")
+                        params.append(fees)
+                    if tracking_number is not None:
+                        update_fields.append("tracking_number = ?")
+                        params.append(tracking_number)
+                    if carrier is not None:
+                        update_fields.append("carrier = ?")
+                        params.append(carrier)
+
+                    params.append(shipment_id)
+                    query = f"UPDATE shipments SET {', '.join(update_fields)} WHERE id = ?"
+                    
+                    cursor.execute(query, tuple(params))
                     conn.commit()
-                    logger.info(f"Estado de envío {shipment_id} actualizado a {new_status}")
+                    logger.info(f"Envío {shipment_id} actualizado. Estado: {new_status}")
                     return True
             except Exception as e:
                 logger.error(f"Error actualizando envío {shipment_id}: {e}")

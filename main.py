@@ -234,11 +234,15 @@ def generate_shipments_email_html(shipments) -> str:
         elif "dhl" in carrier_lower:
             tracking_url = f"https://www.dhl.com/es-es/home/tracking/tracking-express.html?submit=1&tracking-id={tracking}"
         
-        status_color = "#e67e22" # Naranja para Pedido/Enviado
-        if status == "En reparto":
+        status_color = "#e67e22" # Naranja para Pedido
+        if status in ["Enviado", "En tránsito"]:
             status_color = "#3498db" # Azul
-        elif status == "Recibido":
+        elif status == "En reparto":
+            status_color = "#f1c40f" # Amarillo
+        elif status in ["Recibido", "En Stock"]:
             status_color = "#2ecc71" # Verde
+        elif status == "Vendido":
+            status_color = "#9b59b6" # Morado
             
         html += f"""
         <div style="background: #fafafa; border-left: 5px solid {status_color}; padding: 15px; margin-bottom: 15px; border-radius: 4px;">
@@ -483,11 +487,13 @@ async def command_handler(event) -> None:
                 status = s['status']
                 
                 status_emoji = "⏳"
-                if status == "Enviado":
+                if status in ["Enviado", "En tránsito"]:
                     status_emoji = "🚚"
                 elif status == "En reparto":
                     status_emoji = "🛵"
-                elif status == "Recibido":
+                elif status in ["Recibido", "En Stock"]:
+                    status_emoji = "👟"
+                elif status == "Vendido":
                     status_emoji = "✅"
                     
                 response += f"• {status_emoji} **{name}**\n  🚚 {carrier} | 🔢 `{tracking}`\n  📍 Estado: **{status}**\n\n"
